@@ -1,0 +1,43 @@
+# Visual Studio and build outputs
+.vs/
+**/bin/
+**/obj/
+*.user
+*.suo
+*.pdb
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+settings.json
+appsettings.Local.json
+appsettings.*.local.json
+*.pfx
+*.p12
+*.key
+*.pem
+
+# Runtime data and archives
+[Ll]ogs/
+*.log
+*.zip
+*.bak
+
+# Local deployment data, recipes, captures and crash dumps
+**/settings*.json
+**/appsettings*.json
+**/secrets*.json
+*.local
+*.local.*
+*.csv
+*.db
+*.sqlite*
+*.dmp
+*.7z
+*.rar
+*.dll
+*.exe
+captures/
+screenshots/
+publish/
