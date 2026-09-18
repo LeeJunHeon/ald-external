@@ -35,8 +35,12 @@ namespace ALD.External
         /// <summary>워커가 깨움 신호 없이도 pending 을 재시도하는 주기(초)</summary>
         public const int RetrySeconds = 30;
 
-        /// <summary>잠금 파일의 LastWriteTime 이 이보다 오래되면 죽은 잠금으로 보고 삭제한다(초)</summary>
-        public const int LockStaleSeconds = 30;
+        /// <summary>
+        /// 잠금 파일의 LastWriteTime 이 이보다 오래되면 죽은 잠금으로 보고 삭제한다(초).
+        /// 정상 잠금 보유는 수십 ms 이고, 살아 있는 잠금은 FileShare.None 이라 삭제 자체가 실패(공유 위반)하므로
+        /// 이 값은 잠금을 쥔 채 크래시한 프로세스를 복구하기 위한 것이다. 넉넉히 둔다.
+        /// </summary>
+        public const int LockStaleSeconds = 120;
 
         /// <summary>프로그램명(파일 접미사·프로그램 컬럼)</summary>
         public const string DefaultProgramName = "ald";
@@ -381,6 +385,10 @@ namespace ALD.External
 
         private static string BuildLine(OpenEntry e, string result, string reason, DateTime? finishedAt)
         {
+            // 시작하지 않은 요청은 종료시각·소요(분) 빈칸 (Sputter 구현 _build_row 와 동일 규칙)
+            if (!e.StartedAt.HasValue)
+                finishedAt = null;
+
             string res = result ?? "";
             string rsn = res == "성공" ? "" : OneLine(reason);
 
@@ -597,11 +605,19 @@ namespace ALD.External
             }
         }
 
-        /// <summary>파일이 없으면 BOM+헤더를 먼저 쓰고, 이후에는 BOM 없이 append.</summary>
-        private static void AppendCsvLine(string path, string line)
+        /// <summary>
+        /// 파일이 없으면 BOM+헤더를 먼저 쓰고, 이후에는 BOM 없이 append.
+        /// 파일 끝이 개행으로 끝나지 않으면(반쪽 줄) 먼저 CRLF 를 써서 기존 줄과 섞이지 않게 한다.
+        /// </summary>
+        internal static void AppendCsvLine(string path, string line)
         {
             bool exists = File.Exists(path) && new FileInfo(path).Length > 0;
+            bool needsNewline = exists && !EndsWithNewline(path);
             using var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
+            if (needsNewline)
+            {
+                fs.Write(new byte[] { 0x0D, 0x0A }, 0, 2);
+            }
             if (!exists)
             {
                 byte[] bom = Encoding.UTF8.GetPreamble();
@@ -612,6 +628,14 @@ namespace ALD.External
             byte[] b = Encoding.UTF8.GetBytes(line + "\r\n");
             fs.Write(b, 0, b.Length);
             fs.Flush(true);
+        }
+
+        private static bool EndsWithNewline(string path)
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            if (fs.Length == 0) return true;
+            fs.Seek(-1, SeekOrigin.End);
+            return fs.ReadByte() == 0x0A;
         }
 
         // ==== 워커 ====

@@ -103,6 +103,39 @@ namespace ALD.External.Tests
             Assert.Equal("성공", o.Result);
         }
 
+        // 이전 공정의 잔존 알람/정지/Idx 는 새 공정의 Process_Idx<70 을 보기 전까지 누적하지 않는다
+        [Fact]
+        public void Stale_Alarm_And_Stop_Before_Reset_Are_Ignored()
+        {
+            var o = new AldRunObserver();
+            var t = DateTime.Now;
+            o.RequestStart(t);
+            o.Feed(t, true, -1, true, 900);           // Process_Bool=true 직후 이전 공정 값이 보임
+            Assert.False(o.AlarmObserved); Assert.False(o.StopObserved); Assert.False(o.Idx900Seen);
+            o.Feed(t.AddSeconds(1), true, 0, false, 0);
+            Assert.True(o.ResetSeen);
+            o.Feed(t.AddSeconds(2), true, 0, false, 80);
+            o.Feed(t.AddSeconds(3), false, 0, false, 100);
+            Assert.Equal(AldRunEvent.Finished, o.Feed(t.AddSeconds(4), false, 0, false, 100));
+            Assert.Equal("성공", o.Result);
+        }
+
+        // Process_Idx 를 읽지 못하면 ResetSeen 이 서지 않아 알람/정지도 누적되지 않고 종료 시 미확인 (의도된 동작)
+        [Fact]
+        public void Without_ProcessIdx_Alarm_And_Stop_Are_Not_Accumulated_And_Result_Is_Unknown()
+        {
+            var o = new AldRunObserver();
+            var t = DateTime.Now;
+            o.RequestStart(t);
+            o.Feed(t, true, -1, true, null);
+            o.Feed(t.AddSeconds(1), true, -1, true, null);
+            Assert.False(o.ResetSeen); Assert.False(o.AlarmObserved); Assert.False(o.StopObserved);
+            o.Feed(t.AddSeconds(2), false, -1, true, null);
+            Assert.Equal(AldRunEvent.Finished, o.Feed(t.AddSeconds(3), false, -1, true, null));
+            Assert.Equal("미확인", o.Result);
+            Assert.Equal("정상 완료 신호 미확인 (Process_Idx max=0, 900=False)", o.Reason);
+        }
+
         [Fact]
         public void Start_Timeout_600s()
         {

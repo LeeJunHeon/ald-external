@@ -26,9 +26,12 @@ namespace ALD.External
         //   - Process_Idx = 900: 각 단계에서 Utility.ProcessStop 또는 오류 시 설정, case 900 은
         //                        "Process Stop" 로그 후 Stop() (Thread_Process.cs 1476행).
         //   - Stop() 이 Utility.Process_Bool = false 로 내린다 (Thread_Process.cs 124~131행).
-        //   - Form_Command.cs 364~370행: 시작 시 Process_Bool = true, ProcessStop = false 를 먼저 쓰고
-        //                        그 다음 Process_Idx = 0 으로 초기화한다. 즉 Process_Bool 이 true 가 된 직후
-        //                        아주 짧게 이전 공정의 Process_Idx(100/900) 가 보일 수 있다 → 아래 ResetSeen 가드.
+        //   - Form_Command.cs 364~370행: 시작 시 Process_Bool = true → ProcessStop = false → Process_Idx = 0 순서로 쓴다.
+        //                        Process_Bool = true 와 ProcessStop = false 사이, 또는 Process_Idx = 0 이전에 샘플링되면
+        //                        이전 공정의 ProcessStop / Process_Idx(100/900) / 알람 상태가 보일 수 있다.
+        //                        → 알람·정지·Process_Idx 누적은 모두 새 공정의 Process_Idx < 70 을 본 뒤(ResetSeen)부터 한다.
+        //                        Process_Idx 를 읽지 못하면(null) ResetSeen 이 서지 않으므로 알람/정지도 누적하지 않고
+        //                        종료 시 "미확인" 이 된다(의도된 동작: 근거 없는 실패/STOP 판정을 하지 않는다).
         public const int IdxPostProcessStart = 70;   // 이 값 이상을 봤으면 레시피 본체는 끝까지 돈 것
         public const int IdxStopOrError = 900;       // 정지/오류 처리 단계
 
@@ -50,7 +53,7 @@ namespace ALD.External
         public int IdxMax { get; private set; } = int.MinValue;
         public bool Idx900Seen { get; private set; }
 
-        /// <summary>시작 이후 Process_Idx &lt; 70 을 한 번이라도 봤는지(이전 공정의 잔존 값 무시용)</summary>
+        /// <summary>시작 이후 Process_Idx &lt; 70 을 한 번이라도 봤는지. 이전이면 알람/정지/Idx 를 누적하지 않는다.</summary>
         public bool ResetSeen { get; private set; }
 
         public string Result { get; private set; } = "";
@@ -133,18 +136,21 @@ namespace ALD.External
 
         private void Accumulate(int? state, bool? processStop, int? processIdx)
         {
+            // 이전 공정의 잔존 값을 무시: 새 공정의 Process_Idx(<70)를 본 뒤부터 모두 누적
+            if (!ResetSeen)
+            {
+                if (processIdx.HasValue && processIdx.Value < IdxPostProcessStart)
+                    ResetSeen = true;
+                else
+                    return;
+            }
+
             if (state == -1) AlarmObserved = true;
             if (processStop == true) StopObserved = true;
 
             if (processIdx.HasValue)
             {
                 int idx = processIdx.Value;
-                if (!ResetSeen)
-                {
-                    // 이전 공정의 잔존 값(100/900 등)을 무시: 새 공정의 값(<70)을 본 뒤부터 누적
-                    if (idx < IdxPostProcessStart) ResetSeen = true;
-                    else return;
-                }
                 if (idx > IdxMax) IdxMax = idx;
                 if (idx == IdxStopOrError) Idx900Seen = true;
             }

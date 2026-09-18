@@ -127,7 +127,7 @@ namespace ALD.External.Tests
             Assert.True(File.Exists(lockPath));           // 남의 잠금은 건드리지 않음
 
             // 오래된 잠금
-            File.SetLastWriteTime(lockPath, DateTime.Now.AddSeconds(-60));
+            File.SetLastWriteTime(lockPath, DateTime.Now.AddSeconds(-180));
             log.ProcessRoundForTest();
             Assert.Equal(0, TestUtil.PendingCount(log));
             Assert.Equal(2, TestUtil.ReadLines(log.NasFilePath("20260918")).Length);
@@ -326,7 +326,64 @@ namespace ALD.External.Tests
                 Assert.True(keys.Add(f[14]), "duplicate key " + f[14]);
             }
             Assert.Equal(100, lines.Skip(1).Count(l => TestUtil.ParseCsv(l)[13] == "ald"));
-            Assert.False(File.Exists(Path.Combine(d.Nas, "_lock", "Robot.lock")));
+            // 워커가 마지막 줄의 잠금을 finally 에서 지우는 중일 수 있으므로 잠시 기다린다
+            string lockPath = Path.Combine(d.Nas, "_lock", "Robot.lock");
+            Assert.True(TestUtil.WaitUntil(() => !File.Exists(lockPath), timeoutMs: 5000));
+        }
+
+        // 시작하지 않은 요청은 finishedAt 을 줘도 종료시각·소요(분) 빈칸 (예열 CANCELLED/FAIL, 다음 요청 수락 전 종료 미관측)
+        [Fact]
+        public void Unstarted_Request_Has_Blank_Finish_And_Duration()
+        {
+            using var d = new TempDirs();
+            using var log = NewLog(d);
+            var recv = new DateTime(2026, 9, 18, 18, 0, 0);
+            var now = recv.AddMinutes(5);
+
+            string kCancel = log.Request("ALD", "c", "p", recv);
+            log.MarkOwned(kCancel);
+            Assert.True(log.Finalize(kCancel, "STOP", "Preheat job cancelled", now));       // 예열 CANCELLED
+
+            string kFail = log.Request("ALD", "f", "p", recv.AddSeconds(1));
+            log.MarkOwned(kFail);
+            Assert.True(log.Finalize(kFail, "실패", "Preheat timeout. elapsed>3600s", now)); // 예열 FAIL
+
+            string kStarted = log.Request("ALD", "s", "p", recv.AddSeconds(2));
+            log.MarkStarted(kStarted, recv.AddMinutes(1));
+            Assert.True(log.Finalize(kStarted, "미확인", "다음 요청 수락 전 종료 미관측", now)); // 시작한 요청은 채워진다
+
+            log.EnsureWorker(); log.Wake();
+            string nas = log.NasFilePath("20260918");
+            Assert.True(TestUtil.WaitUntil(() => TestUtil.PendingCount(log) == 0 && File.Exists(nas)));
+            var rows = TestUtil.ReadLines(nas).Skip(1).Select(TestUtil.ParseCsv).ToList();
+
+            var c = rows.Single(r => r[14] == kCancel);
+            Assert.Equal("STOP", c[5]); Assert.Equal("", c[2]); Assert.Equal("", c[3]); Assert.Equal("", c[4]);
+            var f = rows.Single(r => r[14] == kFail);
+            Assert.Equal("실패", f[5]); Assert.Equal("", f[2]); Assert.Equal("", f[3]); Assert.Equal("", f[4]);
+            var s = rows.Single(r => r[14] == kStarted);
+            Assert.Equal("18:01:00", s[2]); Assert.Equal("18:05:00", s[3]); Assert.Equal("4.0", s[4]);
+        }
+
+        // 반쪽 줄 보호: 파일 끝이 개행이 아니면 CRLF 를 먼저 쓴다
+        [Fact]
+        public void AppendCsvLine_Repairs_Missing_Trailing_Newline()
+        {
+            using var d = new TempDirs();
+            string path = Path.Combine(d.Nas, "Robot_20260918.csv");
+
+            HostProcessLog.AppendCsvLine(path, "a,b,c");
+            File.AppendAllText(path, "half,line");                 // 개행 없이 끊긴 줄
+            HostProcessLog.AppendCsvLine(path, "x,y,z");
+
+            var lines = TestUtil.ReadLines(path);
+            Assert.Equal(new[] { HostProcessLog.Header, "a,b,c", "half,line", "x,y,z" }, lines);
+            Assert.True(TestUtil.HasBom(path));
+
+            // 정상 파일에는 빈 줄이 생기지 않는다
+            HostProcessLog.AppendCsvLine(path, "1,2,3");
+            Assert.Equal(5, TestUtil.ReadLines(path).Length);
+            Assert.DoesNotContain("\r\n\r\n", File.ReadAllText(path));
         }
 
         // 형식 유틸
