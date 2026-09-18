@@ -80,6 +80,9 @@ namespace ALD.External
         public string JobId { get; set; } = "";
         public string CsvPath { get; set; } = "";
 
+        // 호스트 요청 공정 로그 기록키 (AldModule.HostLog.cs)
+        internal string? HostLogKey { get; set; }
+
         public string RunMode { get; set; } = "full_auto";
         public string Phase { get; set; } = "IDLE";
         public string Message { get; set; } = "";
@@ -155,7 +158,7 @@ namespace ALD.External
     /// - START_ALD: CSV 경로를 받아 레시피를 파싱한 뒤 콜백으로 전달
     /// - GET_ALD_STATUS: ALD 상태 콜백을 조회해 JSON으로 반환
     /// </summary>
-    public static class AldModule
+    public static partial class AldModule
     {
         // ==== 통신 설정 ====
 
@@ -178,7 +181,8 @@ namespace ALD.External
             return "\"" + s.Replace("\"", "\"\"") + "\"";
         }
 
-        private static void LogComm(DateTime recvTime, DateTime sendTime, string remote, string reqJson, string respJson)
+        // 실제 파일 쓰기. 호출은 AldModule.HostLog.cs 의 LogComm(백그라운드 큐)에서만 한다.
+        private static void LogCommWrite(DateTime recvTime, DateTime sendTime, string remote, string reqJson, string respJson)
         {
             try
             {
@@ -493,6 +497,9 @@ namespace ALD.External
 
                 _recipes = new List<AldRecipeRow>();
             }
+
+            // 호스트 요청 공정 로그: 미종료 항목 정리 + 워커 시작 (AldModule.HostLog.cs)
+            HostLogStartup();
         }
 
         /*
@@ -549,6 +556,9 @@ namespace ALD.External
 
             _listener?.Stop();
             _listener = null;
+
+            // 호스트 요청 공정 로그: 관측 태스크 취소 + 워커 종료(최대 2초)
+            HostLogShutdown();
         }
 
         // ==== CSV 파싱 ====
@@ -1141,7 +1151,7 @@ namespace ALD.External
                     string respJson;
                     try
                     {
-                        respJson = HandleJson(reqJson);
+                        respJson = HandleJsonWithHostLog(reqJson, recvTime, remote);
                     }
                     catch (Exception ex)
                     {
@@ -1297,6 +1307,8 @@ namespace ALD.External
                 return BuildErrorResponse(requestIdRaw, "START_ALD", ex.Message);
             }
 
+            HostLogUpdateRecipe(loaded);
+
             try
             {
                 // 로그 이름 보정과 실제 공정 시작을 공통 함수에서 처리한다.
@@ -1352,6 +1364,9 @@ namespace ALD.External
 
             // 반드시 이름 보정 이후에 공정을 시작한다.
             _startRecipeCallback(loaded, mode);
+
+            // 호스트 로그: START 명령 전달 완료 → 관측 시작
+            HostLogOnStartCommandSent();
         }
 
 
@@ -1386,6 +1401,8 @@ namespace ALD.External
             {
                 return BuildErrorResponse(requestIdRaw, "START_ALD_PREHEAT", ex.Message);
             }
+
+            HostLogUpdateRecipe(parsed.Recipes);
 
             string mode = parsed.RunMode;
 
@@ -1433,6 +1450,7 @@ namespace ALD.External
                 };
 
                 _preheatJob = job;
+                HostLogOnPreheatAccepted(job);
             }
 
             // 핵심:
@@ -1653,6 +1671,7 @@ namespace ALD.External
                 ValidatePreheatSafeState();
 
                 ct.ThrowIfCancellationRequested();
+                HostLogSetCurrentKey(job.HostLogKey);
                 StartAldInternal(job.Recipes, job.RunMode);
 
                 SetPreheatPhase(job, "PROCESS", "ALD process start command sent");
@@ -1677,6 +1696,11 @@ namespace ALD.External
                     job.Message = ex.Message;
                     job.PhaseStartedAt = DateTime.Now;
                 }
+            }
+            finally
+            {
+                // 호스트 로그: START 전에 끝난 예열 잡 기록 (START 후에는 관측 태스크가 기록)
+                HostLogOnPreheatFinished(job);
             }
         }
 

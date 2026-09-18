@@ -5,6 +5,8 @@ VisualStudioVersion = 17.14.36623.8 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ALD.External", "ALD.External\ALD.External.csproj", "{04D46D6A-147C-491E-B413-9CF847510007}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ALD.External.Tests", "ALD.External.Tests\ALD.External.Tests.csproj", "{226278AE-F0C2-4D08-B227-CE9CB056EC3D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{04D46D6A-147C-491E-B413-9CF847510007}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{04D46D6A-147C-491E-B413-9CF847510007}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{04D46D6A-147C-491E-B413-9CF847510007}.Release|Any CPU.Build.0 = Release|Any CPU
+		{226278AE-F0C2-4D08-B227-CE9CB056EC3D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{226278AE-F0C2-4D08-B227-CE9CB056EC3D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{226278AE-F0C2-4D08-B227-CE9CB056EC3D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{226278AE-F0C2-4D08-B227-CE9CB056EC3D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
